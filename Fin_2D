@@ -1,0 +1,320 @@
+
+'This program runs different cases of discretized spacing to find the';
+'temperature distribution along the fin and the heat rate at the base of';
+'the fin. A case study of different aspect ratios is found to see the';
+'effects of temperature distributions and heat rates.';
+
+clc; clear; close all;
+
+% =========================================================
+%  GIVEN DATA
+% =========================================================
+k_cond       = 10;
+h            = 600;
+delta_values = [0.002, 0.001, 0.0005];
+T_b          = 45;
+T_inf        = 25;
+L            = 0.008;
+w_initial    = 0.004;   % original width
+es           = 1e-6;
+
+% =========================================================
+%  ITERATE THROUGH DIFFERENT Δ CASES
+% =========================================================
+for di = 1:3
+
+    Delta = delta_values(di);
+    w     = w_initial;
+
+    Nx = round(L / Delta);
+    Ny = round((w/2) / Delta) + 1;
+    N  = Nx * Ny;
+    Bi = h * Delta / k_cond;
+
+    idx = @(m,n) (n-1)*Nx + m;
+
+    A = zeros(N,N);
+    b = zeros(N,1);
+
+    % =========================================================
+    %  BUILD MATRIX
+    % =========================================================
+    for n = 1:Ny
+        for m = 1:Nx
+            i = idx(m,n);
+
+            if n == 1
+                if m == 1
+                    A(i,i)=2*(Bi+2);
+                    A(i,idx(m+1,1))=-1;
+                    A(i,idx(m,2))=-2;
+                    b(i)=T_b+2*Bi*T_inf;
+                elseif m < Nx
+                    A(i,i)=2*(Bi+2);
+                    A(i,idx(m-1,1))=-1;
+                    A(i,idx(m+1,1))=-1;
+                    A(i,idx(m,2))=-2;
+                    b(i)=2*Bi*T_inf;
+                else
+                    A(i,i)=2*(Bi+1);
+                    A(i,idx(m-1,1))=-1;
+                    A(i,idx(m,2))=-1;
+                    b(i)=2*Bi*T_inf;
+                end
+
+            elseif n == Ny
+                if m == 1
+                    A(i,i)=4;
+                    A(i,idx(m+1,Ny))=-1;
+                    A(i,idx(m,Ny-1))=-2;
+                    b(i)=T_b;
+                elseif m < Nx
+                    A(i,i)=4;
+                    A(i,idx(m-1,Ny))=-1;
+                    A(i,idx(m+1,Ny))=-1;
+                    A(i,idx(m,Ny-1))=-2;
+                    b(i)=0;
+                else
+                    A(i,i)=2*(Bi+2);
+                    A(i,idx(m,Ny-1))=-2;
+                    A(i,idx(m-1,Ny))=-2;
+                    b(i)=2*Bi*T_inf;
+                end
+            else
+                if m == 1
+                    A(i,i)=4;
+                    A(i,idx(m+1,n))=-1;
+                    A(i,idx(m,n-1))=-1;
+                    A(i,idx(m,n+1))=-1;
+                    b(i)=T_b;
+                elseif m < Nx
+                    A(i,i)=4;
+                    A(i,idx(m-1,n))=-1;
+                    A(i,idx(m+1,n))=-1;
+                    A(i,idx(m,n-1))=-1;
+                    A(i,idx(m,n+1))=-1;
+                    b(i)=0;
+                else
+                    A(i,i)=2*(Bi+2);
+                    A(i,idx(m-1,n))=-2;
+                    A(i,idx(m,n-1))=-1;
+                    A(i,idx(m,n+1))=-1;
+                    b(i)=2*Bi*T_inf;
+                end
+            end
+        end
+    end
+
+    % =========================================================
+    %  SOLVE
+    % =========================================================
+    fprintf('=====================================================\n');
+    fprintf('                Using Δ = %.4f [m]\n', Delta);
+    fprintf('=====================================================\n');
+
+    [T_vec, iterations] = GaussSeidel(A,b,es);
+    fprintf('Converged in %d iterations\n\n', iterations);
+
+    % =========================================================
+    %  BUILD FULL 2D TEMPERATURE MATRIX (WITH MIRROR)
+    % =========================================================
+    Nrows = 2*Ny - 1;
+    T_matrix = zeros(Nrows, Nx+1);
+    T_matrix(:,1) = T_b;
+
+    for n = 1:Ny
+        for m = 1:Nx
+            T_matrix(n,m+1) = T_vec(idx(m,n));
+        end
+    end
+
+    for k = 1:Ny-1
+        T_matrix(Ny+k,:) = T_matrix(Ny-k,:);
+    end
+
+    % =========================================================
+    %  DISPLAY TEMPERATURE DISTRIBUTION
+    % =========================================================
+
+    fprintf('          Base  ');
+    for m = 1:Nx
+        fprintf('  Node%-2d', m);
+    end
+    fprintf('\n');
+
+    % Build row labels
+    row_labels = cell(Nrows, 1);
+    row_labels{1}     = 'Top     ';
+    row_labels{Ny}    = 'Center  ';
+    row_labels{Nrows} = 'Bottom  ';
+    for k = 1:Ny-2
+        row_labels{1+k}  = sprintf('Row%-2d   ', 1+k);
+        row_labels{Ny+k} = sprintf('Row%-2d   ', Ny+k);
+    end
+
+    for n = 1:Nrows
+        fprintf('%s', row_labels{n});
+        for m = 1:Nx+1
+            fprintf('  %6.3f', T_matrix(n, m));
+        end
+        fprintf('\n');
+    end
+    fprintf('\n');
+
+    % =========================================================
+    %  HEAT RATE (GENERAL FORM)
+    % =========================================================
+    qa = h*(Delta/2)*(T_b-T_inf);
+    qb = k_cond*(1/2)*(T_b-T_vec(idx(1,1)));
+
+    q_sum = 0;
+    for j = 2:Ny-1
+        q_sum = q_sum + k_cond*(T_b-T_vec(idx(1,j)));
+    end
+
+    q_end = k_cond*(T_b-T_vec(idx(1,Ny)));
+    q_total = 2*(qa + qb + q_sum) + q_end;
+
+    fprintf('Heat rate at base = %.4f [W/m]\n\n', q_total);
+
+end
+
+
+% =========================================================
+%  ASPECT RATIO STUDY (Δ = 1 mm)
+% =========================================================
+Delta = 0.001;
+aspect_ratios = 1:8;
+
+fprintf('==========================================================================\n');
+fprintf('                      ASPECT RATIO STUDY (Δ = 1 mm)\n');
+fprintf('==========================================================================\n');
+fprintf(' L/w     w [mm]     q FDM [W/m]     q convective [W/m]     Iterations\n');
+fprintf('--------------------------------------------------------------------------\n');
+
+for AR = aspect_ratios
+
+    w  = L / AR;
+    Nx = L / Delta;
+    Ny = round((w/2) / Delta) + 1;
+    N  = Nx * Ny;
+    Bi = h * Delta / k_cond;
+
+    idx = @(m,n) (n-1)*Nx + m;
+
+    A = zeros(N,N);
+    b = zeros(N,1);
+
+    for n = 1:Ny
+        for m = 1:Nx
+            i = idx(m,n);
+
+            if n == 1
+                if m == 1
+                    A(i,i)=2*(Bi+2);
+                    A(i,idx(m+1,1))=-1;
+                    A(i,idx(m,2))=-2;
+                    b(i)=T_b+2*Bi*T_inf;
+                elseif m < Nx
+                    A(i,i)=2*(Bi+2);
+                    A(i,idx(m-1,1))=-1;
+                    A(i,idx(m+1,1))=-1;
+                    A(i,idx(m,2))=-2;
+                    b(i)=2*Bi*T_inf;
+                else
+                    A(i,i)=2*(Bi+1);
+                    A(i,idx(m-1,1))=-1;
+                    A(i,idx(m,2))=-1;
+                    b(i)=2*Bi*T_inf;
+                end
+            elseif n == Ny
+                if m == 1
+                    A(i,i)=4;
+                    A(i,idx(m+1,Ny))=-1;
+                    A(i,idx(m,Ny-1))=-2;
+                    b(i)=T_b;
+                elseif m < Nx
+                    A(i,i)=4;
+                    A(i,idx(m-1,Ny))=-1;
+                    A(i,idx(m+1,Ny))=-1;
+                    A(i,idx(m,Ny-1))=-2;
+                    b(i)=0;
+                else
+                    A(i,i)=2*(Bi+2);
+                    A(i,idx(m,Ny-1))=-2;
+                    A(i,idx(m-1,Ny))=-2;
+                    b(i)=2*Bi*T_inf;
+                end
+            else
+                if m == 1
+                    A(i,i)=4;
+                    A(i,idx(m+1,n))=-1;
+                    A(i,idx(m,n-1))=-1;
+                    A(i,idx(m,n+1))=-1;
+                    b(i)=T_b;
+                elseif m < Nx
+                    A(i,i)=4;
+                    A(i,idx(m-1,n))=-1;
+                    A(i,idx(m+1,n))=-1;
+                    A(i,idx(m,n-1))=-1;
+                    A(i,idx(m,n+1))=-1;
+                    b(i)=0;
+                else
+                    A(i,i)=2*(Bi+2);
+                    A(i,idx(m-1,n))=-2;
+                    A(i,idx(m,n-1))=-1;
+                    A(i,idx(m,n+1))=-1;
+                    b(i)=2*Bi*T_inf;
+                end
+            end
+        end
+    end
+
+    [T_vec, iterations] = GaussSeidel(A,b,es);
+
+    qa = h*(Delta/2)*(T_b-T_inf);
+    qb = k_cond*(1/2)*(T_b-T_vec(idx(1,1)));
+
+    q_sum = 0;
+    for j = 2:Ny-1
+        q_sum = q_sum + k_cond*(T_b-T_vec(idx(1,j)));
+    end
+
+    q_end = k_cond*(T_b-T_vec(idx(1,Ny)));
+    q_FDM = 2*(qa + qb + q_sum) + q_end;
+
+    P  = 2;
+    Ac = w;
+    m  = sqrt(h*P/(k_cond*Ac));
+    M  = sqrt(h*P*k_cond*Ac) * (T_b - T_inf);
+
+    q_conv = M * ((sinh(m*L)+(h/(m*k_cond))*cosh(m*L)) / ...
+         (cosh(m*L)+(h/(m*k_cond))*sinh(m*L)));
+
+    fprintf(' %3.0f     %6.3f     %10.4f        %10.4f             %6d\n', ...
+        AR, w*1000, q_FDM, q_conv, iterations);
+
+end
+
+% =========================================================
+%  GAUSS-SEIDEL FUNCTION
+% =========================================================
+function [x, iter] = GaussSeidel(A, b, es, maxit)
+
+    if nargin < 3 || isempty(es), es = 1e-6; end
+    if nargin < 4 || isempty(maxit), maxit = 50000; end
+
+    n = length(b);
+    x = zeros(n,1);
+
+    for iter = 1:maxit
+        xold = x;
+        for i = 1:n
+            sigma = A(i,1:i-1)*x(1:i-1) + A(i,i+1:n)*xold(i+1:n);
+            x(i) = (b(i)-sigma)/A(i,i);
+        end
+        if max(abs(x-xold)) < es
+            break
+        end
+    end
+end
