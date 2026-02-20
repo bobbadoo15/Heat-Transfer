@@ -1,4 +1,4 @@
-# Heat-Transfer
+# Heat Transfer
 A collection of MATLAB projects and homework assignments completed as part of a Heat Transfer course. Each program explores a core concept in thermal analysis — from conduction and convection to fin theory — implemented numerically to reinforce the underlying physical principles.
 
 ## 2D Fin Simulation
